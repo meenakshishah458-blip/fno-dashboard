@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NSE F&O Live Dashboard</title>
+<style>
+  :root {
+    --bg: #0b0e11;
+    --panel: #12161b;
+    --line: #1f262e;
+    --text: #e8edf2;
+    --muted: #8a94a0;
+    --green: #26a878;
+    --red: #d9534f;
+    --amber: #d9a441;
+    --accent: #3fa9f5;
+    --mono: 'JetBrains Mono', 'Consolas', monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--mono);
+    margin: 0;
+    padding: 20px;
+    font-size: 13px;
+  }
+  header {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: 16px;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+  h1 {
+    font-size: 16px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin: 0;
+  }
+  #status {
+    color: var(--muted);
+    font-size: 11px;
+  }
+  #status.error { color: var(--red); }
+
+  .index-strip {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 18px;
+    flex-wrap: wrap;
+  }
+  .index-card {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 10px 16px;
+    min-width: 130px;
+  }
+  .index-card .label { color: var(--muted); font-size: 10px; letter-spacing: 0.06em; }
+  .index-card .value { font-size: 18px; margin-top: 4px; }
+  .index-card .change { font-size: 11px; margin-top: 2px; }
+  .up { color: var(--green); }
+  .down { color: var(--red); }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    overflow: hidden;
+  }
+  th, td {
+    padding: 8px 10px;
+    text-align: right;
+    border-bottom: 1px solid var(--line);
+    white-space: nowrap;
+  }
+  th:first-child, td:first-child { text-align: left; }
+  th {
+    color: var(--muted);
+    font-weight: 500;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    position: sticky;
+    top: 0;
+    background: var(--panel);
+  }
+  tbody tr:hover { background: #171c22; }
+  .symbol { font-weight: 600; }
+
+  .badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+  }
+  .badge.BUY { background: rgba(38,168,120,0.15); color: var(--green); }
+  .badge.SELL { background: rgba(217,83,79,0.15); color: var(--red); }
+  .badge.WATCH { background: rgba(217,164,65,0.15); color: var(--amber); }
+  .badge.NO-SIGNAL { background: rgba(138,148,160,0.15); color: var(--muted); }
+
+  .table-wrap { max-height: 72vh; overflow: auto; border-radius: 6px; }
+  #empty { color: var(--muted); padding: 30px; text-align: center; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>NSE F&amp;O · 15min Dashboard</h1>
+  <div id="status">connecting...</div>
+</header>
+
+<div class="index-strip" id="indexStrip"></div>
+
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr>
+        <th>Symbol</th>
+        <th>LTP</th>
+        <th>Monthly Pivot</th>
+        <th>Weekly Pivot</th>
+        <th>Daily Pivot</th>
+        <th>EMA 21</th>
+        <th>26-Candle High</th>
+        <th>VWAP</th>
+        <th>RSI 14</th>
+        <th>EMA21 on RSI</th>
+        <th>Signal</th>
+      </tr>
+    </thead>
+    <tbody id="tbody"></tbody>
+  </table>
+  <div id="empty" style="display:none;">No data yet - waiting for first refresh (or backend needs Upstox login).</div>
+</div>
+
+<script>
+  // Point this at wherever you deploy the FastAPI backend.
+  const API_BASE = "http://localhost:8000";
+
+  function fmt(n) {
+    return (n === null || n === undefined) ? "—" : Number(n).toFixed(2);
+  }
+
+  function renderIndices(indices) {
+    const strip = document.getElementById("indexStrip");
+    strip.innerHTML = "";
+    Object.entries(indices || {}).forEach(([name, v]) => {
+      const changeClass = (v.change ?? 0) >= 0 ? "up" : "down";
+      const arrow = (v.change ?? 0) >= 0 ? "▲" : "▼";
+      strip.innerHTML += `
+        <div class="index-card">
+          <div class="label">${name}</div>
+          <div class="value">${fmt(v.ltp)}</div>
+          <div class="change ${changeClass}">${arrow} ${fmt(v.change)}</div>
+        </div>`;
+    });
+  }
+
+  function renderRows(rows) {
+    const tbody = document.getElementById("tbody");
+    const empty = document.getElementById("empty");
+    if (!rows || rows.length === 0) {
+      tbody.innerHTML = "";
+      empty.style.display = "block";
+      return;
+    }
+    empty.style.display = "none";
+    tbody.innerHTML = rows.map(r => {
+      const badgeClass = (r.signal || "NO SIGNAL").replace(" ", "-");
+      return `
+        <tr>
+          <td class="symbol">${r.symbol}</td>
+          <td>${fmt(r.ltp)}</td>
+          <td>${fmt(r.monthly_pivot)}</td>
+          <td>${fmt(r.weekly_pivot)}</td>
+          <td>${fmt(r.daily_pivot)}</td>
+          <td>${fmt(r.ema21)}</td>
+          <td>${fmt(r.high_26_candle)}</td>
+          <td>${fmt(r.vwap)}</td>
+          <td>${fmt(r.rsi14)}</td>
+          <td>${fmt(r.ema21_on_rsi)}</td>
+          <td><span class="badge ${badgeClass}">${r.signal || "NO SIGNAL"}</span></td>
+        </tr>`;
+    }).join("");
+  }
+
+  async function refresh() {
+    const statusEl = document.getElementById("status");
+    try {
+      const res = await fetch(`${API_BASE}/api/dashboard`);
+      const data = await res.json();
+      renderIndices(data.indices);
+      renderRows(data.rows);
+      if (data.error) {
+        statusEl.textContent = "⚠ " + data.error;
+        statusEl.classList.add("error");
+      } else {
+        statusEl.textContent = "last updated: " + (data.last_updated || "—");
+        statusEl.classList.remove("error");
+      }
+    } catch (e) {
+      statusEl.textContent = "⚠ Cannot reach backend at " + API_BASE;
+      statusEl.classList.add("error");
+    }
+  }
+
+  refresh();
+  setInterval(refresh, 30000); // poll every 30s; backend itself recomputes every 15min candle
+</script>
+
+</body>
+</html>
