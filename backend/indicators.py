@@ -122,6 +122,16 @@ def build_stock_row(symbol: str, daily_df: pd.DataFrame, intraday_15m_df: pd.Dat
     else:
         row.update({"ema21": None, "rsi14": None, "ema21_on_rsi": None, "ltp": None})
 
+    # % change vs previous session's close (for the CHANGE % column / sort)
+    if row["ltp"] is not None and len(daily_df) >= 2:
+        prev_close = daily_df.iloc[-2]["close"]
+        if prev_close:
+            row["change_pct"] = round((row["ltp"] - prev_close) / prev_close * 100, 2)
+        else:
+            row["change_pct"] = None
+    else:
+        row["change_pct"] = None
+
     row["signal"] = compute_signal(row)
     return row
 
